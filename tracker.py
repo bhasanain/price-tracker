@@ -155,6 +155,11 @@ def main():
         name, url = part["name"], part["url"]
         try:
             price, status = fetch(url)
+            for _ in range(2):  # retry blocked pages; a new proxy address often works
+                if status != "captcha" or not os.environ.get("SCRAPER_API_KEY"):
+                    break
+                time.sleep(3)
+                price, status = fetch(url)
         except requests.RequestException as exc:
             price, status = None, f"error_{type(exc).__name__}"
         rows.append([today, name, f"{price:.2f}" if price else "", status, url])
