@@ -196,6 +196,10 @@ def main():
             print(f"FAIL {name}: {status}")
         time.sleep(random.uniform(1, 2) if os.environ.get('SCRAPER_API_KEY') else random.uniform(4, 9))  # be gentle
 
+    final = os.environ.get("TRACKER_FINAL", "1") == "1"
+    if failures and not final:
+        print(f"{len(failures)} page(s) failed; not final attempt, will retry later.")
+        return 3
     append_log(rows)
 
     lines = [build_summary(parts, current, history)]
