@@ -81,7 +81,15 @@ def extract_price(html):
 
 
 def fetch(url):
-    resp = requests.get(url, headers=HEADERS, timeout=30, allow_redirects=True)
+    api_key = os.environ.get("SCRAPER_API_KEY")
+    if api_key:
+        resp = requests.get(
+            "https://api.scraperapi.com/",
+            params={"api_key": api_key, "url": url, "country_code": "sa"},
+            timeout=90,
+        )
+    else:
+        resp = requests.get(url, headers=HEADERS, timeout=30, allow_redirects=True)
     if resp.status_code != 200:
         return None, f"http_{resp.status_code}"
     return extract_price(resp.text)
@@ -156,7 +164,7 @@ def main():
         else:
             failures.append(f"{name} ({status})")
             print(f"FAIL {name}: {status}")
-        time.sleep(random.uniform(4, 9))  # be gentle
+        time.sleep(random.uniform(1, 2) if os.environ.get('SCRAPER_API_KEY') else random.uniform(4, 9))  # be gentle
 
     append_log(rows)
 

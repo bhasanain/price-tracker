@@ -2,7 +2,7 @@ name: Daily price check
 
 on:
   schedule:
-    - cron: "0 6 * * *"   # 06:00 UTC = 09:00 Saudi time, every day
+    - cron: "0 6 * * 2,5"   # 06:00 UTC = 09:00 Saudi time, every day
   workflow_dispatch: {}    # lets you press "Run workflow" manually
 
 permissions:
@@ -21,6 +21,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
         run: python tracker.py
       - name: Save price history
         run: |
