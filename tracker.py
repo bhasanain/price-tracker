@@ -22,6 +22,7 @@ from bs4 import BeautifulSoup
 ROOT = Path(__file__).parent
 PARTS_FILE = ROOT / "parts.json"
 LOG_FILE = ROOT / "prices.csv"
+BUILD_TARGET = 9320.0  # ideal total for all parts marked in_build
 JUMP_PCT = 10.0  # alert when price rises/falls this much vs the previous check
 
 HEADERS = {
@@ -131,6 +132,28 @@ def evaluate(part, price, past):
     return alerts
 
 
+def build_summary(parts, current, history):
+    """Total of all in_build parts now vs the ideal BUILD_TARGET."""
+    total, stale = 0.0, []
+    for p in parts:
+        if not p.get("in_build"):
+            continue
+        n = p["name"]
+        if n in current:
+            total += current[n]
+        else:  # page unreadable today: fall back to last good price
+            total += (history.get(n) or [p["last_seen"]])[-1]
+            stale.append(n)
+    diff = total - BUILD_TARGET
+    verdict = f"SAR {abs(diff):,.2f} {'ABOVE' if diff > 0 else 'BELOW'} ideal" if diff else "exactly at ideal"
+    if diff <= 0:
+        verdict += " - BUY NOW"
+    text = f"Build total now: SAR {total:,.2f}\nIdeal: SAR {BUILD_TARGET:,.2f} ({verdict})"
+    if stale:
+        text += f"\n({len(stale)} part(s) unreadable today, used last known price)"
+    return text
+
+
 def send_telegram(text):
     token, chat_id = os.environ.get("TELEGRAM_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
@@ -150,6 +173,7 @@ def main():
     history = load_history()
     today = date.today().isoformat()
     rows, alerts, failures = [], [], []
+    current = {}
 
     for part in parts:
         name, url = part["name"], part["url"]
@@ -164,6 +188,7 @@ def main():
             price, status = None, f"error_{type(exc).__name__}"
         rows.append([today, name, f"{price:.2f}" if price else "", status, url])
         if status == "ok":
+            current[name] = price
             alerts += evaluate(part, price, history.get(name, []))
             print(f"OK   {name}: SAR {price:,.2f}")
         else:
@@ -173,7 +198,7 @@ def main():
 
     append_log(rows)
 
-    lines = []
+    lines = [build_summary(parts, current, history)]
     if alerts:
         lines.append("Price alerts:\n" + "\n".join(f"- {a}" for a in alerts))
     if failures:
