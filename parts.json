@@ -1,0 +1,18 @@
+[
+  {"name": "CPU - Ryzen 7 7800X3D", "url": "https://amzn.eu/d/05upPCg2", "last_seen": 1299.00, "target": 1170.00},
+  {"name": "CPU backup - Ryzen 5 9600X", "url": "https://amzn.eu/d/0aZFsxrQ", "last_seen": 759.00, "target": 690.00},
+  {"name": "GPU - XFX RX 9070 XT White", "url": "https://amzn.eu/d/0hm5TXNn", "last_seen": 3790.00, "target": 3400.00},
+  {"name": "GPU alt - Gigabyte RX 9060 XT Ice", "url": "https://amzn.eu/d/0aRLuLKe", "last_seen": 3330.00, "target": 2900.00},
+  {"name": "GPU alt - Gigabyte RTX 5070 Eagle Ice", "url": "https://amzn.eu/d/0eViyy9Z", "last_seen": 3788.21, "target": 3400.00},
+  {"name": "Motherboard - ASUS B650E MAX Gaming WiFi W", "url": "https://amzn.eu/d/02rGWa3d", "last_seen": 663.00, "target": 600.00},
+  {"name": "RAM - Corsair Vengeance RGB RS 16GB White", "url": "https://amzn.eu/d/07bdDotG", "last_seen": 1322.28, "target": 1190.00},
+  {"name": "PSU - Lian Li EDGE Gold 850W White", "url": "https://amzn.eu/d/060ASsJg", "last_seen": 479.00, "target": 430.00},
+  {"name": "AIO - Thermalright Frozen Magic 360 White", "url": "https://amzn.eu/d/0hnP1AwY", "last_seen": 281.68, "target": 255.00},
+  {"name": "Case - Lian Li O11 Vision Compact White", "url": "https://amzn.eu/d/0dfL3ICy", "last_seen": 499.00, "target": 450.00},
+  {"name": "Fans - Jungle Leopard V2 3-pack White", "url": "https://amzn.eu/d/0hTvUAcp", "last_seen": 143.64, "target": 130.00},
+  {"name": "SSD - Crucial P310 1TB", "url": "https://amzn.eu/d/03YCpT7i", "last_seen": 664.73, "target": 600.00},
+  {"name": "ARGB hub - Thermalright 10-port", "url": "https://amzn.eu/d/0eATgBuZ", "last_seen": 28.50, "target": 26.00},
+  {"name": "Cable covers - AsiaHorse ARGB", "url": "https://amzn.eu/d/0g0XNRC4", "last_seen": 150.00, "target": 135.00},
+  {"name": "Monitor - MSI MAG 274QP QD-OLED", "url": "https://amzn.eu/d/02qWLR9g", "last_seen": 2000.00, "target": 1800.00},
+  {"name": "Monitor alt - Z-Edge INFINYX 27 QD-OLED", "url": "https://amzn.eu/d/01f6yZHM", "last_seen": 1798.99, "target": 1620.00}
+]
