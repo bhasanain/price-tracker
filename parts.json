@@ -1,7 +1,7 @@
 [
-  {"name": "CPU - Ryzen 7 7800X3D", "url": "https://amzn.eu/d/05upPCg2", "last_seen": 1299.0, "target": 1170.0, "in_build": true},
+  {"name": "CPU - Ryzen 7 7800X3D", "url": "https://amzn.eu/d/05upPCg2", "last_seen": 1299.0, "target": 1170.0, "in_build": true, "buying": true},
   {"name": "CPU backup - Ryzen 5 9600X", "url": "https://amzn.eu/d/0aZFsxrQ", "last_seen": 759.0, "target": 690.0},
-  {"name": "GPU - XFX RX 9070 XT White", "url": "https://amzn.eu/d/0hm5TXNn", "last_seen": 3790.0, "target": 3400.0, "in_build": true},
+  {"name": "GPU - XFX RX 9070 XT White", "url": "https://amzn.eu/d/0hm5TXNn", "last_seen": 3790.0, "target": 3400.0, "in_build": true, "buying": true},
   {"name": "GPU alt - Gigabyte RX 9060 XT Ice", "url": "https://amzn.eu/d/0aRLuLKe", "last_seen": 3330.0, "target": 2900.0},
   {"name": "GPU alt - Gigabyte RTX 5070 Eagle Ice", "url": "https://amzn.eu/d/0eViyy9Z", "last_seen": 3788.21, "target": 3400.0},
   {"name": "Motherboard - ASUS B650E MAX Gaming WiFi W", "url": "https://amzn.eu/d/02rGWa3d", "last_seen": 663.0, "target": 600.0, "in_build": true},

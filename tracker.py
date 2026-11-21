@@ -154,6 +154,62 @@ def build_summary(parts, current, history):
     return text
 
 
+# Approximate dates; Hijri holidays shift by a day or two. Edit freely.
+EVENTS = [
+    ("2026-11-16", "2026-12-02", "White Friday / Black Friday sale season"),
+    ("2026-12-10", "2026-12-31", "End-of-year sales"),
+    ("2027-02-20", "2027-02-23", "Saudi Founding Day (Feb 22)"),
+    ("2027-02-06", "2027-03-08", "Ramadan (expect Ramadan deals)"),
+    ("2027-03-09", "2027-03-13", "Eid al-Fitr (approx.)"),
+    ("2027-05-14", "2027-05-20", "Eid al-Adha (approx.)"),
+    ("2027-09-21", "2027-09-24", "Saudi National Day (Sep 23)"),
+]
+
+
+def sale_context(today):
+    """Lines about sales/holidays active now or starting within 14 days."""
+    from datetime import date as _d, timedelta
+    t = _d.fromisoformat(today)
+    out = []
+    for start, end, label in EVENTS:
+        s, e = _d.fromisoformat(start), _d.fromisoformat(end)
+        if s <= t <= e:
+            out.append(f"Now: {label} (until about {end})")
+        elif t < s <= t + timedelta(days=14):
+            out.append(f"Soon: {label} (starts about {start})")
+    return out
+
+
+def buy_advice(parts, current, history, today):
+    """Buy / wait verdict for parts marked buying=true."""
+    lines = []
+    for p in parts:
+        if not p.get("buying") or p["name"] not in current:
+            continue
+        n, price = p["name"], current[p["name"]]
+        past = history.get(n, [])
+        count = len(past) + 1
+        head = f"{n}: SAR {price:,.2f}"
+        if past:
+            low, avg = min(past), sum(past) / len(past)
+            head += f" (lowest logged SAR {low:,.2f}, average SAR {avg:,.2f}, {count} readings)"
+        if p.get("target") and price <= p["target"]:
+            verdict = "AT/BELOW YOUR TARGET - good time to buy"
+        elif count < 5:
+            verdict = f"TOO EARLY to judge, only {count} reading(s) so far"
+        elif price <= low:
+            verdict = "BEST PRICE SO FAR - good time to buy"
+        elif price <= low * 1.03:
+            verdict = "NEAR the best price (within 3%)"
+        else:
+            verdict = f"WAIT - {(price - low) / low * 100:.0f}% above the lowest logged price"
+        lines.append(f"{head}\n  -> {verdict}")
+    ctx = sale_context(today)
+    if ctx:
+        lines.append("\n".join(ctx) + "\n(Sale prices are not always real discounts; trust the history above.)")
+    return "\n\n".join(lines)
+
+
 def send_telegram(text):
     token, chat_id = os.environ.get("TELEGRAM_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
@@ -203,6 +259,9 @@ def main():
     append_log(rows)
 
     lines = [build_summary(parts, current, history)]
+    advice = buy_advice(parts, current, history, today)
+    if advice:
+        lines.append("BUYING LIST\n" + advice)
     if alerts:
         lines.append("Price alerts:\n" + "\n".join(f"- {a}" for a in alerts))
     if failures:
