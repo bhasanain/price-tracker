@@ -81,6 +81,27 @@ def extract_price(html):
     return None, "no_price"
 
 
+LIST_SELECTORS = [
+    "#corePriceDisplay_desktop_feature_div span.a-price.a-text-price span.a-offscreen",
+    "#corePrice_feature_div span.a-price.a-text-price span.a-offscreen",
+    "span.basisPrice span.a-offscreen",
+    "span.a-price.a-text-price[data-a-strike='true'] span.a-offscreen",
+    "#listPrice",
+]
+
+
+def extract_list_price(html, price):
+    """Amazon's crossed-out 'was' price, only if it is higher than the current price."""
+    soup = BeautifulSoup(html, "html.parser")
+    for selector in LIST_SELECTORS:
+        node = soup.select_one(selector)
+        if node:
+            lp = parse_price(node.get_text())
+            if lp and price and lp > price:
+                return lp
+    return None
+
+
 def fetch(url):
     api_key = os.environ.get("SCRAPER_API_KEY")
     if api_key:
@@ -92,8 +113,9 @@ def fetch(url):
     else:
         resp = requests.get(url, headers=HEADERS, timeout=30, allow_redirects=True)
     if resp.status_code != 200:
-        return None, f"http_{resp.status_code}"
-    return extract_price(resp.text)
+        return None, f"http_{resp.status_code}", None
+    price, status = extract_price(resp.text)
+    return price, status, (extract_list_price(resp.text, price) if status == "ok" else None)
 
 
 def load_history():
@@ -180,34 +202,46 @@ def sale_context(today):
     return out
 
 
-def buy_advice(parts, current, history, today):
-    """Buy / wait verdict for parts marked buying=true."""
-    lines = []
-    for p in parts:
-        if not p.get("buying") or p["name"] not in current:
+def buy_advice(parts, current, history, today, list_prices=None):
+    """Every part: price, Amazon list price + discount, history, and a buy/wait verdict."""
+    list_prices = list_prices or {}
+    ordered = [p for p in parts if p.get("buying")] + [p for p in parts if not p.get("buying")]
+    blocks = []
+    for p in ordered:
+        n = p["name"]
+        if n not in current:
             continue
-        n, price = p["name"], current[p["name"]]
+        price = current[n]
         past = history.get(n, [])
         count = len(past) + 1
-        head = f"{n}: SAR {price:,.2f}"
+        star = "* " if p.get("buying") else ""
+        line1 = f"{star}{n}: SAR {price:,.2f}"
+        lp = list_prices.get(n)
+        if lp:
+            line1 += f" (list SAR {lp:,.2f}, {(lp - price) / lp * 100:.0f}% off)"
+        bits = []
+        if p.get("last_seen"):
+            ch = (price - p["last_seen"]) / p["last_seen"] * 100
+            bits.append(f"you saw {p['last_seen']:,.2f} ({ch:+.0f}%)")
         if past:
             low, avg = min(past), sum(past) / len(past)
-            head += f" (lowest logged SAR {low:,.2f}, average SAR {avg:,.2f}, {count} readings)"
+            bits.append(f"low {low:,.2f}, avg {avg:,.2f}, {count} readings")
         if p.get("target") and price <= p["target"]:
             verdict = "AT/BELOW YOUR TARGET - good time to buy"
         elif count < 5:
-            verdict = f"TOO EARLY to judge, only {count} reading(s) so far"
+            verdict = f"too early to judge ({count} reading(s))"
         elif price <= low:
             verdict = "BEST PRICE SO FAR - good time to buy"
         elif price <= low * 1.03:
-            verdict = "NEAR the best price (within 3%)"
+            verdict = "near the best price (within 3%)"
         else:
-            verdict = f"WAIT - {(price - low) / low * 100:.0f}% above the lowest logged price"
-        lines.append(f"{head}\n  -> {verdict}")
+            verdict = f"WAIT - {(price - low) / low * 100:.0f}% above lowest"
+        bits.append(verdict)
+        blocks.append(line1 + "\n  " + " | ".join(bits))
     ctx = sale_context(today)
     if ctx:
-        lines.append("\n".join(ctx) + "\n(Sale prices are not always real discounts; trust the history above.)")
-    return "\n\n".join(lines)
+        blocks.append("\n".join(ctx) + "\n(Sale prices are not always real discounts; trust the history.)")
+    return "\n\n".join(blocks)
 
 
 def send_telegram(text):
@@ -215,13 +249,21 @@ def send_telegram(text):
     if not token or not chat_id:
         print("Telegram not configured; message below was NOT sent:\n" + text)
         return
-    resp = requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        data={"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": "true"},
-        timeout=30,
-    )
-    if resp.status_code != 200:
-        print("Telegram error:", resp.status_code, resp.text[:200])
+    chunks, cur = [], ""
+    for block in text.split("\n\n"):
+        if cur and len(cur) + len(block) + 2 > 3800:
+            chunks.append(cur)
+            cur = ""
+        cur = (cur + "\n\n" + block) if cur else block
+    chunks.append(cur)
+    for chunk in chunks:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data={"chat_id": chat_id, "text": chunk[:4000], "disable_web_page_preview": "true"},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            print("Telegram error:", resp.status_code, resp.text[:200])
 
 
 def main():
@@ -229,22 +271,24 @@ def main():
     history = load_history()
     today = date.today().isoformat()
     rows, alerts, failures = [], [], []
-    current = {}
+    current, list_prices = {}, {}
 
     for part in parts:
         name, url = part["name"], part["url"]
         try:
-            price, status = fetch(url)
+            price, status, list_price = fetch(url)
             for _ in range(2):  # retry blocked pages; a new proxy address often works
                 if status != "captcha" or not os.environ.get("SCRAPER_API_KEY"):
                     break
                 time.sleep(3)
-                price, status = fetch(url)
+                price, status, list_price = fetch(url)
         except requests.RequestException as exc:
-            price, status = None, f"error_{type(exc).__name__}"
+            price, status, list_price = None, f"error_{type(exc).__name__}", None
         rows.append([today, name, f"{price:.2f}" if price else "", status, url])
         if status == "ok":
             current[name] = price
+            if list_price:
+                list_prices[name] = list_price
             alerts += evaluate(part, price, history.get(name, []))
             print(f"OK   {name}: SAR {price:,.2f}")
         else:
@@ -261,7 +305,7 @@ def main():
     lines = [build_summary(parts, current, history)]
     advice = buy_advice(parts, current, history, today)
     if advice:
-        lines.append("BUYING LIST\n" + advice)
+        lines.append("ALL PARTS (* = you plan to buy)\n\n" + advice)
     if alerts:
         lines.append("Price alerts:\n" + "\n".join(f"- {a}" for a in alerts))
     if failures:
