@@ -128,6 +128,17 @@ def load_history():
     return history
 
 
+def load_days():
+    """name -> set of distinct dates with a good reading (several runs a day count once)."""
+    days = {}
+    if LOG_FILE.exists():
+        with LOG_FILE.open(newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if row["status"] == "ok" and row["price"]:
+                    days.setdefault(row["name"], set()).add(row["date"])
+    return days
+
+
 def append_log(rows):
     new_file = not LOG_FILE.exists()
     with LOG_FILE.open("a", newline="", encoding="utf-8") as f:
@@ -202,7 +213,7 @@ def sale_context(today):
     return out
 
 
-def buy_advice(parts, current, history, today, list_prices=None):
+def buy_advice(parts, current, history, today, list_prices=None, days=None):
     """Every part: price, Amazon list price + discount, history, and a buy/wait verdict."""
     list_prices = list_prices or {}
     ordered = [p for p in parts if p.get("buying")] + [p for p in parts if not p.get("buying")]
@@ -213,7 +224,7 @@ def buy_advice(parts, current, history, today, list_prices=None):
             continue
         price = current[n]
         past = history.get(n, [])
-        count = len(past) + 1
+        count = len((days or {}).get(n, set()) | {today}) if days is not None else len(past) + 1
         star = "* " if p.get("buying") else ""
         line1 = f"{star}{n}: SAR {price:,.2f}"
         lp = list_prices.get(n)
@@ -225,13 +236,19 @@ def buy_advice(parts, current, history, today, list_prices=None):
             bits.append(f"you saw {p['last_seen']:,.2f} ({ch:+.0f}%)")
         if past:
             low, avg = min(past), sum(past) / len(past)
-            bits.append(f"low {low:,.2f}, avg {avg:,.2f}, {count} readings")
+            bits.append(f"low {low:,.2f}, avg {avg:,.2f}, {count} day(s) tracked")
         if p.get("target") and price <= p["target"]:
             verdict = "AT/BELOW YOUR TARGET - good time to buy"
         elif count < 5:
-            verdict = f"too early to judge ({count} reading(s))"
+            verdict = f"too early to judge ({count} day(s) of data)"
+        elif max(past) == min(past) == price:
+            verdict = "unchanged since tracking began"
         elif price <= low:
-            verdict = "BEST PRICE SO FAR - good time to buy"
+            ls = p.get("last_seen")
+            if ls and price > ls * 1.05:
+                verdict = f"lowest logged, but {(price - ls) / ls * 100:.0f}% above the price you saw - check the page"
+            else:
+                verdict = "BEST PRICE SO FAR - good time to buy"
         elif price <= low * 1.03:
             verdict = "near the best price (within 3%)"
         else:
