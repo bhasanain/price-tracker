@@ -277,10 +277,10 @@ def main():
         name, url = part["name"], part["url"]
         try:
             price, status, list_price = fetch(url)
-            for _ in range(2):  # retry blocked pages; a new proxy address often works
-                if status != "captcha" or not os.environ.get("SCRAPER_API_KEY"):
+            for _ in range(2):  # Amazon rate-limits bursts: wait, then retry captcha pages
+                if status != "captcha":
                     break
-                time.sleep(3)
+                time.sleep(random.uniform(45, 75) if not os.environ.get("SCRAPER_API_KEY") else 3)
                 price, status, list_price = fetch(url)
         except requests.RequestException as exc:
             price, status, list_price = None, f"error_{type(exc).__name__}", None
@@ -294,7 +294,7 @@ def main():
         else:
             failures.append(f"{name} ({status})")
             print(f"FAIL {name}: {status}")
-        time.sleep(random.uniform(1, 2) if os.environ.get('SCRAPER_API_KEY') else random.uniform(4, 9))  # be gentle
+        time.sleep(random.uniform(1, 2) if os.environ.get('SCRAPER_API_KEY') else random.uniform(10, 20))  # be gentle
 
     final = os.environ.get("TRACKER_FINAL", "1") == "1"
     if failures and not final:
