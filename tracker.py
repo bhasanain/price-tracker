@@ -372,7 +372,7 @@ def main():
     except Exception:
         pass
 
-    failures = [f"{p['name']} ({status_of.get(p['name'], 'not_read')})" for p in parts if p["name"] not in current]
+    failures = [f"{p['name']} ({status_of.get(p['name'], 'not_read')})\n  {p['url']}" for p in parts if p["name"] not in current]
     final = os.environ.get("TRACKER_FINAL", "1") == "1"
     if failures and not final:
         PARTIAL_FILE.write_text(json.dumps({"date": today, "ok": {n: [current[n], list_prices.get(n)] for n in current}}))
