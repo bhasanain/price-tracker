@@ -31,8 +31,17 @@ HEADERS = {
         "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
     ),
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept": "text/html,application/xhtml+xml",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Upgrade-Insecure-Requests": "1",
+    "Referer": "https://www.amazon.sa/",
 }
+COOKIE_FILE = ROOT / ".cookies.json"
+PARTIAL_FILE = ROOT / ".partial.json"
+SESSION = requests.Session()
+try:  # reuse cookies between runs: a returning visitor gets fewer captchas
+    SESSION.cookies.update(json.loads(COOKIE_FILE.read_text()))
+except Exception:
+    pass
 
 PRICE_SELECTORS = [
     "#corePrice_feature_div span.a-price span.a-offscreen",
@@ -111,11 +120,44 @@ def fetch(url):
             timeout=90,
         )
     else:
-        resp = requests.get(url, headers=HEADERS, timeout=30, allow_redirects=True)
+        resp = SESSION.get(url, headers=HEADERS, timeout=30, allow_redirects=True)
     if resp.status_code != 200:
         return None, f"http_{resp.status_code}", None
     price, status = extract_price(resp.text)
     return price, status, (extract_list_price(resp.text, price) if status == "ok" else None)
+
+
+def explain(html):
+    """Debug: which price candidates exist on a page and who sells it."""
+    soup = BeautifulSoup(html, "html.parser")
+    title = soup.select_one("#productTitle")
+    print("Title:", title.get_text(strip=True)[:120] if title else "(none)")
+    for sel in ("#merchant-info", "#tabular-buybox .tabular-buybox-text", "#sellerProfileTriggerId"):
+        node = soup.select_one(sel)
+        if node:
+            print("Seller info:", " ".join(node.get_text(" ", strip=True).split())[:160])
+            break
+    for sel in PRICE_SELECTORS + LIST_SELECTORS:
+        node = soup.select_one(sel)
+        if node:
+            print(f"  {sel} -> {node.get_text(strip=True)}")
+
+
+def check_part(fragment):
+    parts = json.loads(PARTS_FILE.read_text(encoding="utf-8"))
+    for p in parts:
+        if fragment.lower() in p["name"].lower():
+            print("Part:", p["name"], "| you saw:", p.get("last_seen"))
+            resp = SESSION.get(p["url"], headers=HEADERS, timeout=30, allow_redirects=True)
+            print("HTTP", resp.status_code)
+            if any(m in resp.text for m in CAPTCHA_MARKERS):
+                print("Captcha page - try again later.")
+            else:
+                print("Script reads:", extract_price(resp.text))
+                explain(resp.text)
+            return 0
+    print("No part matches", fragment)
+    return 1
 
 
 def load_history():
@@ -286,11 +328,25 @@ def send_telegram(text):
 def main():
     parts = json.loads(PARTS_FILE.read_text(encoding="utf-8"))
     history = load_history()
+    days = load_days()
     today = date.today().isoformat()
-    rows, alerts, failures = [], [], []
-    current, list_prices = {}, {}
+    current, list_prices, status_of = {}, {}, {}
 
-    for part in parts:
+    # Pages already read earlier today are not fetched again (fewer requests, fewer captchas).
+    try:
+        saved = json.loads(PARTIAL_FILE.read_text())
+        if saved.get("date") == today:
+            for name, (price, lp) in saved["ok"].items():
+                current[name] = price
+                if lp:
+                    list_prices[name] = lp
+                status_of[name] = "ok"
+    except Exception:
+        pass
+
+    todo = [p for p in parts if p["name"] not in current]
+    random.shuffle(todo)  # different order each run so the same pages aren't always last
+    for part in todo:
         name, url = part["name"], part["url"]
         try:
             price, status, list_price = fetch(url)
@@ -301,26 +357,42 @@ def main():
                 price, status, list_price = fetch(url)
         except requests.RequestException as exc:
             price, status, list_price = None, f"error_{type(exc).__name__}", None
-        rows.append([today, name, f"{price:.2f}" if price else "", status, url])
+        status_of[name] = status
         if status == "ok":
             current[name] = price
             if list_price:
                 list_prices[name] = list_price
-            alerts += evaluate(part, price, history.get(name, []))
             print(f"OK   {name}: SAR {price:,.2f}")
         else:
-            failures.append(f"{name} ({status})")
             print(f"FAIL {name}: {status}")
-        time.sleep(random.uniform(1, 2) if os.environ.get('SCRAPER_API_KEY') else random.uniform(10, 20))  # be gentle
+        time.sleep(random.uniform(1, 2) if os.environ.get("SCRAPER_API_KEY") else random.uniform(10, 20))
 
+    try:
+        COOKIE_FILE.write_text(json.dumps(requests.utils.dict_from_cookiejar(SESSION.cookies)))
+    except Exception:
+        pass
+
+    failures = [f"{p['name']} ({status_of.get(p['name'], 'not_read')})" for p in parts if p["name"] not in current]
     final = os.environ.get("TRACKER_FINAL", "1") == "1"
     if failures and not final:
-        print(f"{len(failures)} page(s) failed; not final attempt, will retry later.")
+        PARTIAL_FILE.write_text(json.dumps({"date": today, "ok": {n: [current[n], list_prices.get(n)] for n in current}}))
+        print(f"{len(failures)} page(s) still unread; keeping the {len(current)} good ones, retrying later.")
         return 3
+
+    rows = []
+    for p in parts:
+        n = p["name"]
+        rows.append([today, n, f"{current[n]:.2f}" if n in current else "", "ok" if n in current else status_of.get(n, "not_read"), p["url"]])
     append_log(rows)
+    PARTIAL_FILE.unlink(missing_ok=True)
+
+    alerts = []
+    for p in parts:
+        if p["name"] in current:
+            alerts += evaluate(p, current[p["name"]], history.get(p["name"], []))
 
     lines = [build_summary(parts, current, history)]
-    advice = buy_advice(parts, current, history, today)
+    advice = buy_advice(parts, current, history, today, list_prices, days)
     if advice:
         lines.append("ALL PARTS (* = you plan to buy)\n\n" + advice)
     if alerts:
@@ -328,13 +400,12 @@ def main():
     if failures:
         lines.append(f"Could not read {len(failures)} of {len(parts)} pages:\n" + "\n".join(f"- {f}" for f in failures))
         if len(failures) == len(parts):
-            lines.append("Every page failed. Amazon is probably blocking this server. Check prices manually and see README.")
-    if lines:
-        send_telegram("\n\n".join(lines))
-    else:
-        print("No alerts today.")
+            lines.append("Every page failed. Amazon is probably blocking this connection. Check prices manually and see README.")
+    send_telegram("\n\n".join(lines))
     return 0
 
 
+if __name__ == "__main__" and len(sys.argv) > 2 and sys.argv[1] == "--check":
+    sys.exit(check_part(sys.argv[2]))
 if __name__ == "__main__":
     sys.exit(main())
