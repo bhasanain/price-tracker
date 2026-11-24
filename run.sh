@@ -1,12 +1,12 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Scheduled wrapper for Termux. Runs the tracker once per day (after 09:00).
+# Scheduled wrapper for Termux. Runs the tracker once per day (after 06:00).
 # If pages fail it retries on the next scheduled slot; the 4th attempt reports.
 cd "$(dirname "$0")" || exit 1
 termux-wake-lock 2>/dev/null
 source ~/.tracker_env
 STATE=~/.tracker_state
 today=$(date +%F)
-[ "$(date +%H)" -lt 9 ] && exit 0
+[ "$((10#$(date +%H)))" -lt 6 ] && exit 0
 d=""; n=0; done=""
 [ -f "$STATE" ] && read -r d n done < "$STATE"
 [ "$d" = "$today" ] && [ "$done" = "done" ] && exit 0
