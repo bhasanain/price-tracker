@@ -37,6 +37,7 @@ HEADERS = {
 }
 COOKIE_FILE = ROOT / ".cookies.json"
 PARTIAL_FILE = ROOT / ".partial.json"
+DEAL_FILE = ROOT / ".deal_active"
 SESSION = requests.Session()
 try:  # reuse cookies between runs: a returning visitor gets fewer captchas
     SESSION.cookies.update(json.loads(COOKIE_FILE.read_text()))
@@ -303,6 +304,93 @@ def buy_advice(parts, current, history, today, list_prices=None, days=None):
     return "\n\n".join(blocks)
 
 
+def goal_price(parts, current, history, part):
+    """Highest price this part can cost for the whole build to still hit BUILD_TARGET."""
+    others = 0.0
+    for p in parts:
+        if not p.get("in_build") or p["name"] == part["name"]:
+            continue
+        n = p["name"]
+        others += current[n] if n in current else (history.get(n) or [p["last_seen"]])[-1]
+    return BUILD_TARGET - others
+
+
+def spam_reasons(parts, part, price, list_price, history, current):
+    """Why this part deserves a loud alert right now (empty list = no)."""
+    reasons = []
+    pct = part.get("spam_discount")
+    if part.get("goal_part"):
+        gp = goal_price(parts, current, history, part)
+        if price <= gp:
+            reasons.append(f"at or below SAR {gp:,.0f}, which puts your whole build back on the SAR {BUILD_TARGET:,.0f} goal")
+    if pct and list_price and (list_price - price) / list_price * 100 >= pct:
+        reasons.append(f"{(list_price - price) / list_price * 100:.0f}% off Amazon's list price (SAR {list_price:,.2f})")
+    past = history.get(part["name"], [])
+    if pct and past:
+        avg = sum(past) / len(past)
+        if (avg - price) / avg * 100 >= pct:
+            reasons.append(f"{(avg - price) / avg * 100:.0f}% below its average logged price (SAR {avg:,.2f})")
+    return reasons
+
+
+def spam_burst(part, price, reasons, count=5):
+    msg = f"BUY ALERT: {part['name']} is SAR {price:,.2f}\n" + "\n".join(f"- {r}" for r in reasons) + f"\nOpen it now: {part['url']}"
+    for i in range(count):
+        send_telegram(f"[{i + 1}/{count}] {msg}")
+        time.sleep(2)
+
+
+def check_deals(parts, current, list_prices, history):
+    """Loud alerts for 'buying' parts. Returns True while a deal is active."""
+    active = False
+    for p in parts:
+        if not p.get("buying") or p["name"] not in current:
+            continue
+        reasons = spam_reasons(parts, p, current[p["name"]], list_prices.get(p["name"]), history, current)
+        if reasons:
+            active = True
+            if not DEAL_FILE.exists():
+                spam_burst(p, current[p["name"]], reasons)
+    if active:
+        DEAL_FILE.write_text(date.today().isoformat())
+    elif DEAL_FILE.exists():
+        DEAL_FILE.unlink()
+        send_telegram("Deal alert ended: your watched parts are no longer at the alert level.")
+    return active
+
+
+def deal_mode():
+    """Hourly follow-up while a deal is active: re-check only the 'buying' parts and keep pinging."""
+    parts = json.loads(PARTS_FILE.read_text(encoding="utf-8"))
+    history = load_history()
+    current, list_prices = {}, {}
+    for p in parts:
+        if not p.get("buying"):
+            continue
+        try:
+            price, status, lp = fetch(p["url"])
+        except requests.RequestException:
+            continue
+        if status == "ok":
+            current[p["name"]] = price
+            if lp:
+                list_prices[p["name"]] = lp
+        time.sleep(random.uniform(10, 20))
+    for p in parts:
+        if p.get("buying") and p["name"] in current:
+            reasons = spam_reasons(parts, p, current[p["name"]], list_prices.get(p["name"]), history, current)
+            if reasons:
+                spam_burst(p, current[p["name"]], reasons, count=3)
+                DEAL_FILE.write_text(date.today().isoformat())
+            elif DEAL_FILE.exists() and not any(
+                spam_reasons(parts, q, current[q["name"]], list_prices.get(q["name"]), history, current)
+                for q in parts if q.get("buying") and q["name"] in current
+            ):
+                DEAL_FILE.unlink()
+                send_telegram("Deal alert ended: your watched parts are no longer at the alert level.")
+    return 0
+
+
 def send_telegram(text):
     token, chat_id = os.environ.get("TELEGRAM_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
@@ -372,6 +460,8 @@ def main():
     except Exception:
         pass
 
+    check_deals(parts, current, list_prices, history)
+
     failures = [f"{p['name']} ({status_of.get(p['name'], 'not_read')})\n  {p['url']}" for p in parts if p["name"] not in current]
     final = os.environ.get("TRACKER_FINAL", "1") == "1"
     if failures and not final:
@@ -405,6 +495,8 @@ def main():
     return 0
 
 
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--deal":
+    sys.exit(deal_mode())
 if __name__ == "__main__" and len(sys.argv) > 2 and sys.argv[1] == "--check":
     sys.exit(check_part(sys.argv[2]))
 if __name__ == "__main__":

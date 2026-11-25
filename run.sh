@@ -9,7 +9,12 @@ today=$(date +%F)
 [ "$((10#$(date +%H)))" -lt 6 ] && exit 0
 d=""; n=0; done=""
 [ -f "$STATE" ] && read -r d n done < "$STATE"
-[ "$d" = "$today" ] && [ "$done" = "done" ] && exit 0
+if [ "$d" = "$today" ] && [ "$done" = "done" ]; then
+  # a deal is active: keep re-checking the watched parts every hour
+  [ -f .deal_active ] && python tracker.py --deal
+  termux-wake-unlock 2>/dev/null
+  exit 0
+fi
 [ "$d" != "$today" ] && n=0
 n=$((n+1))
 if [ "$n" -ge 4 ]; then export TRACKER_FINAL=1; else export TRACKER_FINAL=0; fi
