@@ -61,5 +61,45 @@
   "must": [
    "white"
   ]
+ },
+ {
+  "name": "White DDR5 RAM",
+  "query": "white ddr5 ram 16gb 5600",
+  "must": [
+   "ddr5",
+   "white"
+  ]
+ },
+ {
+  "name": "White AM5 motherboard",
+  "query": "white b650 am5 motherboard",
+  "must": [
+   "b650",
+   "white"
+  ]
+ },
+ {
+  "name": "White 850W PSU",
+  "query": "white 850w power supply modular",
+  "must": [
+   "850",
+   "white"
+  ]
+ },
+ {
+  "name": "White 360mm AIO",
+  "query": "white 360 aio cpu cooler",
+  "must": [
+   "360",
+   "white"
+  ]
+ },
+ {
+  "name": "White PC case",
+  "query": "white pc case tempered glass",
+  "must": [
+   "white",
+   "case"
+  ]
  }
 ]
