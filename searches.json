@@ -22,5 +22,44 @@
    "5070",
    "white"
   ]
+ },
+ {
+  "name": "White DDR5 RAM",
+  "query": "white ddr5 ram 5600 6000 kit",
+  "must": [
+   "ddr5",
+   "white"
+  ]
+ },
+ {
+  "name": "White AM5 motherboard",
+  "query": "white b650 motherboard am5",
+  "must": [
+   "b650",
+   "white"
+  ]
+ },
+ {
+  "name": "White 850W PSU",
+  "query": "white 850w gold power supply atx 3.1",
+  "must": [
+   "850",
+   "white"
+  ]
+ },
+ {
+  "name": "White 360 AIO",
+  "query": "white 360mm aio cooler argb",
+  "must": [
+   "360",
+   "white"
+  ]
+ },
+ {
+  "name": "White PC case",
+  "query": "white mid tower case tempered glass",
+  "must": [
+   "white"
+  ]
  }
 ]
