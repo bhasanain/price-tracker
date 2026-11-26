@@ -1,0 +1,26 @@
+[
+ {
+  "name": "White RX 9070 XT",
+  "query": "white rx 9070 xt graphics card",
+  "must": [
+   "9070",
+   "white"
+  ]
+ },
+ {
+  "name": "White RX 9060 XT",
+  "query": "white rx 9060 xt graphics card",
+  "must": [
+   "9060",
+   "white"
+  ]
+ },
+ {
+  "name": "White RTX 5070",
+  "query": "white rtx 5070 graphics card",
+  "must": [
+   "5070",
+   "white"
+  ]
+ }
+]

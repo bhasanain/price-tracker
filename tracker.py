@@ -210,19 +210,20 @@ def evaluate(part, price, past):
 
 def build_summary(parts, current, history):
     """Total of all in_build parts now vs the ideal BUILD_TARGET, with bought parts locked in."""
-    total, spent, stale = 0.0, 0.0, []
+    total, spent, stale, used = 0.0, 0.0, [], {}
     for p in parts:
         if not p.get("in_build"):
             continue
         n = p["name"]
         if p.get("bought"):
-            total += p["bought"]
+            used[n] = p["bought"]
             spent += p["bought"]
         elif n in current:
-            total += current[n]
+            used[n] = current[n]
         else:  # page unreadable today: fall back to last good price
-            total += (history.get(n) or [p["last_seen"]])[-1]
+            used[n] = (history.get(n) or [p["last_seen"]])[-1]
             stale.append(n)
+        total += used[n]
     diff = total - BUILD_TARGET
     verdict = f"SAR {abs(diff):,.2f} {'ABOVE' if diff > 0 else 'BELOW'} ideal" if diff else "exactly at ideal"
     if diff <= 0:
@@ -231,6 +232,12 @@ def build_summary(parts, current, history):
     if spent:
         text += (f"\nAlready bought: SAR {spent:,.2f}"
                  f"\nRemaining parts cost now: SAR {total - spent:,.2f} (budget left for them: SAR {BUILD_TARGET - spent:,.2f})")
+    for p in parts:  # what the build would cost with a cheaper alternative part
+        base = p.get("alt_for")
+        if base in used and p["name"] in current:
+            alt = total - used[base] + current[p["name"]]
+            d = alt - BUILD_TARGET
+            text += f"\nWith {p['name'].split(' - ')[-1]} instead: SAR {alt:,.2f} ({'ABOVE' if d > 0 else 'BELOW'} ideal by SAR {abs(d):,.2f})"
     if stale:
         text += f"\n({len(stale)} part(s) unreadable today, used last known price)"
     return text
@@ -402,6 +409,50 @@ def deal_mode():
     return 0
 
 
+def parse_search(html):
+    """Results from an Amazon.sa search page: [(title, price, url)]."""
+    out = []
+    soup = BeautifulSoup(html, "html.parser")
+    for card in soup.select('div[data-component-type="s-search-result"]'):
+        asin = card.get("data-asin")
+        title = card.select_one("h2")
+        price = card.select_one("span.a-price span.a-offscreen")
+        if asin and title and price:
+            val = parse_price(price.get_text())
+            if val:
+                out.append((title.get_text(" ", strip=True), val, f"https://www.amazon.sa/dp/{asin}"))
+    return out
+
+
+def run_searches(parts, current):
+    """Weekly: look for other white models and message the cheapest ones."""
+    try:
+        searches = json.loads((ROOT / "searches.json").read_text(encoding="utf-8"))
+    except Exception:
+        return
+    blocks = []
+    for sr in searches:
+        try:
+            if os.environ.get("SCRAPER_API_KEY"):
+                resp = requests.get("https://api.scraperapi.com/", params={"api_key": os.environ["SCRAPER_API_KEY"], "url": "https://www.amazon.sa/s?k=" + requests.utils.quote(sr["query"]), "country_code": "sa"}, timeout=90)
+            else:
+                resp = SESSION.get("https://www.amazon.sa/s", params={"k": sr["query"]}, headers=HEADERS, timeout=30)
+            if resp.status_code != 200 or any(m in resp.text for m in CAPTCHA_MARKERS):
+                blocks.append(f"{sr['name']}: search page unavailable today")
+                continue
+            hits = [r for r in parse_search(resp.text) if all(w in r[0].lower() for w in sr["must"])]
+        except requests.RequestException:
+            continue
+        hits = sorted(hits, key=lambda r: r[1])[:4]
+        if hits:
+            blocks.append(sr["name"] + ":\n" + "\n".join(f"- SAR {p:,.2f} {t[:70]}\n  {u}" for t, p, u in hits))
+        else:
+            blocks.append(f"{sr['name']}: no matching white listings found")
+        time.sleep(random.uniform(10, 20))
+    if blocks:
+        send_telegram("WEEKLY: OTHER WHITE OPTIONS (cheapest matches on Amazon.sa search)\n\n" + "\n\n".join(blocks))
+
+
 def send_telegram(text):
     token, chat_id = os.environ.get("TELEGRAM_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
@@ -508,6 +559,8 @@ def main():
         if len(failures) == len(parts):
             lines.append("Every page failed. Amazon is probably blocking this connection. Check prices manually and see README.")
     send_telegram("\n\n".join(lines))
+    if date.today().weekday() == 4:  # Fridays: look for other white models
+        run_searches(parts, current)
     return 0
 
 
