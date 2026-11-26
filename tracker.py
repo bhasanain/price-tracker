@@ -209,13 +209,16 @@ def evaluate(part, price, past):
 
 
 def build_summary(parts, current, history):
-    """Total of all in_build parts now vs the ideal BUILD_TARGET."""
-    total, stale = 0.0, []
+    """Total of all in_build parts now vs the ideal BUILD_TARGET, with bought parts locked in."""
+    total, spent, stale = 0.0, 0.0, []
     for p in parts:
         if not p.get("in_build"):
             continue
         n = p["name"]
-        if n in current:
+        if p.get("bought"):
+            total += p["bought"]
+            spent += p["bought"]
+        elif n in current:
             total += current[n]
         else:  # page unreadable today: fall back to last good price
             total += (history.get(n) or [p["last_seen"]])[-1]
@@ -225,6 +228,9 @@ def build_summary(parts, current, history):
     if diff <= 0:
         verdict += " - BUY NOW"
     text = f"Build total now: SAR {total:,.2f}\nIdeal: SAR {BUILD_TARGET:,.2f} ({verdict})"
+    if spent:
+        text += (f"\nAlready bought: SAR {spent:,.2f}"
+                 f"\nRemaining parts cost now: SAR {total - spent:,.2f} (budget left for them: SAR {BUILD_TARGET - spent:,.2f})")
     if stale:
         text += f"\n({len(stale)} part(s) unreadable today, used last known price)"
     return text
@@ -263,6 +269,9 @@ def buy_advice(parts, current, history, today, list_prices=None, days=None):
     blocks = []
     for p in ordered:
         n = p["name"]
+        if p.get("bought"):
+            blocks.append(f"* {n}: BOUGHT at SAR {p['bought']:,.2f}" if p.get("buying") else f"{n}: BOUGHT at SAR {p['bought']:,.2f}")
+            continue
         if n not in current:
             continue
         price = current[n]
@@ -344,7 +353,7 @@ def check_deals(parts, current, list_prices, history):
     """Loud alerts for 'buying' parts. Returns True while a deal is active."""
     active = False
     for p in parts:
-        if not p.get("buying") or p["name"] not in current:
+        if not p.get("buying") or p.get("bought") or p["name"] not in current:
             continue
         reasons = spam_reasons(parts, p, current[p["name"]], list_prices.get(p["name"]), history, current)
         if reasons:
@@ -365,7 +374,9 @@ def deal_mode():
     history = load_history()
     current, list_prices = {}, {}
     for p in parts:
-        if not p.get("buying"):
+        if p.get("bought"):
+            current[p["name"]] = p["bought"]
+        if not p.get("buying") or p.get("bought"):
             continue
         try:
             price, status, lp = fetch(p["url"])
@@ -377,14 +388,14 @@ def deal_mode():
                 list_prices[p["name"]] = lp
         time.sleep(random.uniform(10, 20))
     for p in parts:
-        if p.get("buying") and p["name"] in current:
+        if p.get("buying") and not p.get("bought") and p["name"] in current:
             reasons = spam_reasons(parts, p, current[p["name"]], list_prices.get(p["name"]), history, current)
             if reasons:
                 spam_burst(p, current[p["name"]], reasons, count=3)
                 DEAL_FILE.write_text(date.today().isoformat())
             elif DEAL_FILE.exists() and not any(
                 spam_reasons(parts, q, current[q["name"]], list_prices.get(q["name"]), history, current)
-                for q in parts if q.get("buying") and q["name"] in current
+                for q in parts if q.get("buying") and not q.get("bought") and q["name"] in current
             ):
                 DEAL_FILE.unlink()
                 send_telegram("Deal alert ended: your watched parts are no longer at the alert level.")
@@ -419,6 +430,11 @@ def main():
     days = load_days()
     today = date.today().isoformat()
     current, list_prices, status_of = {}, {}, {}
+
+    for p in parts:  # bought parts are locked at the price paid and never fetched
+        if p.get("bought"):
+            current[p["name"]] = p["bought"]
+            status_of[p["name"]] = "bought"
 
     # Pages already read earlier today are not fetched again (fewer requests, fewer captchas).
     try:
@@ -472,13 +488,13 @@ def main():
     rows = []
     for p in parts:
         n = p["name"]
-        rows.append([today, n, f"{current[n]:.2f}" if n in current else "", "ok" if n in current else status_of.get(n, "not_read"), p["url"]])
+        rows.append([today, n, f"{current[n]:.2f}" if n in current else "", status_of.get(n, "ok") if n in current else status_of.get(n, "not_read"), p["url"]])
     append_log(rows)
     PARTIAL_FILE.unlink(missing_ok=True)
 
     alerts = []
     for p in parts:
-        if p["name"] in current:
+        if p["name"] in current and not p.get("bought"):
             alerts += evaluate(p, current[p["name"]], history.get(p["name"], []))
 
     lines = [build_summary(parts, current, history)]
