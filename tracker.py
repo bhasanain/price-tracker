@@ -7,6 +7,7 @@ big jump (+10% vs last check), and pages it could not read.
 It only reads public pages. It never logs in, adds to cart, or buys anything.
 """
 import csv
+import html
 import json
 import os
 import random
@@ -208,41 +209,6 @@ def evaluate(part, price, past):
     return alerts
 
 
-def build_summary(parts, current, history):
-    """Total of all in_build parts now vs the ideal BUILD_TARGET, with bought parts locked in."""
-    total, spent, stale, used = 0.0, 0.0, [], {}
-    for p in parts:
-        if not p.get("in_build"):
-            continue
-        n = p["name"]
-        if p.get("bought"):
-            used[n] = p["bought"]
-            spent += p["bought"]
-        elif n in current:
-            used[n] = current[n]
-        else:  # page unreadable today: fall back to last good price
-            used[n] = (history.get(n) or [p["last_seen"]])[-1]
-            stale.append(n)
-        total += used[n]
-    diff = total - BUILD_TARGET
-    verdict = f"SAR {abs(diff):,.2f} {'ABOVE' if diff > 0 else 'BELOW'} ideal" if diff else "exactly at ideal"
-    if diff <= 0:
-        verdict += " - BUY NOW"
-    text = f"Build total now: SAR {total:,.2f}\nIdeal: SAR {BUILD_TARGET:,.2f} ({verdict})"
-    if spent:
-        text += (f"\nAlready bought: SAR {spent:,.2f}"
-                 f"\nRemaining parts cost now: SAR {total - spent:,.2f} (budget left for them: SAR {BUILD_TARGET - spent:,.2f})")
-    for p in parts:  # what the build would cost with a cheaper alternative part
-        base = p.get("alt_for")
-        if base in used and p["name"] in current:
-            alt = total - used[base] + current[p["name"]]
-            d = alt - BUILD_TARGET
-            text += f"\nWith {p['name'].split(' - ')[-1]} instead: SAR {alt:,.2f} ({'ABOVE' if d > 0 else 'BELOW'} ideal by SAR {abs(d):,.2f})"
-    if stale:
-        text += f"\n({len(stale)} part(s) unreadable today, used last known price)"
-    return text
-
-
 # Approximate dates; Hijri holidays shift by a day or two. Edit freely.
 EVENTS = [
     ("2026-11-16", "2026-12-02", "White Friday / Black Friday sale season"),
@@ -267,57 +233,6 @@ def sale_context(today):
         elif t < s <= t + timedelta(days=14):
             out.append(f"Soon: {label} (starts about {start})")
     return out
-
-
-def buy_advice(parts, current, history, today, list_prices=None, days=None):
-    """Every part: price, Amazon list price + discount, history, and a buy/wait verdict."""
-    list_prices = list_prices or {}
-    ordered = [p for p in parts if p.get("buying")] + [p for p in parts if not p.get("buying")]
-    blocks = []
-    for p in ordered:
-        n = p["name"]
-        if p.get("bought"):
-            blocks.append(f"* {n}: BOUGHT at SAR {p['bought']:,.2f}" if p.get("buying") else f"{n}: BOUGHT at SAR {p['bought']:,.2f}")
-            continue
-        if n not in current:
-            continue
-        price = current[n]
-        past = history.get(n, [])
-        count = len((days or {}).get(n, set()) | {today}) if days is not None else len(past) + 1
-        star = "* " if p.get("buying") else ""
-        line1 = f"{star}{n}: SAR {price:,.2f}"
-        lp = list_prices.get(n)
-        if lp:
-            line1 += f" (list SAR {lp:,.2f}, {(lp - price) / lp * 100:.0f}% off)"
-        bits = []
-        if p.get("last_seen"):
-            ch = (price - p["last_seen"]) / p["last_seen"] * 100
-            bits.append(f"you saw {p['last_seen']:,.2f} ({ch:+.0f}%)")
-        if past:
-            low, avg = min(past), sum(past) / len(past)
-            bits.append(f"low {low:,.2f}, avg {avg:,.2f}, {count} day(s) tracked")
-        if p.get("target") and price <= p["target"]:
-            verdict = "AT/BELOW YOUR TARGET - good time to buy"
-        elif count < 5:
-            verdict = f"too early to judge ({count} day(s) of data)"
-        elif max(past) == min(past) == price:
-            verdict = "unchanged since tracking began"
-        elif price <= low:
-            ls = p.get("last_seen")
-            if ls and price > ls * 1.05:
-                verdict = f"lowest logged, but {(price - ls) / ls * 100:.0f}% above the price you saw - check the page"
-            else:
-                verdict = "BEST PRICE SO FAR - good time to buy"
-        elif price <= low * 1.03:
-            verdict = "near the best price (within 3%)"
-        else:
-            verdict = f"WAIT - {(price - low) / low * 100:.0f}% above lowest"
-        bits.append(verdict)
-        blocks.append(line1 + "\n  " + " | ".join(bits))
-    ctx = sale_context(today)
-    if ctx:
-        blocks.append("\n".join(ctx) + "\n(Sale prices are not always real discounts; trust the history.)")
-    return "\n\n".join(blocks)
 
 
 def goal_price(parts, current, history, part):
@@ -350,9 +265,14 @@ def spam_reasons(parts, part, price, list_price, history, current):
 
 
 def spam_burst(part, price, reasons, count=5):
-    msg = f"BUY ALERT: {part['name']} is SAR {price:,.2f}\n" + "\n".join(f"- {r}" for r in reasons) + f"\nOpen it now: {part['url']}"
     for i in range(count):
-        send_telegram(f"[{i + 1}/{count}] {msg}")
+        send_telegram(
+            f"<b>\U0001F6A8 BUY ALERT {i + 1}/{count}</b>\n"
+            f"<b>{esc(label(part['name']))}</b> is now <b>SAR {money(price)}</b>\n"
+            + "\n".join(f"\u2022 {esc(r)}" for r in reasons)
+            + f"\n<a href=\"{esc(part['url'])}\">Open on Amazon.sa</a>",
+            use_html=True,
+        )
         time.sleep(2)
 
 
@@ -409,6 +329,133 @@ def deal_mode():
     return 0
 
 
+def esc(text):
+    return html.escape(str(text), quote=False)
+
+
+def money(x):
+    return f"{x:,.2f}" if x < 100 else f"{x:,.0f}"
+
+
+def label(name):
+    """'GPU - XFX RX 9070 XT White' -> 'GPU · XFX RX 9070 XT White'."""
+    return name.replace(" - ", " \u00b7 ", 1)
+
+
+def part_status(p, price, past, count, list_price):
+    """(icon, short verdict) for one part."""
+    low = min(past) if past else None
+    if p.get("target") and price <= p["target"]:
+        return "\U0001F7E2", "at or below your target"
+    if count < 5:
+        return "\u26AA", f"too early to judge ({count} day(s) of data)"
+    if max(past) == min(past) == price:
+        return "\u26AA", "unchanged since tracking began"
+    if price <= low:
+        ls = p.get("last_seen")
+        if ls and price > ls * 1.05:
+            return "\U0001F7E1", f"lowest logged, but {(price - ls) / ls * 100:.0f}% above first seen"
+        return "\U0001F7E2", "best price so far"
+    if price <= low * 1.03:
+        return "\U0001F7E1", "near the best price"
+    return "\U0001F534", f"{(price - low) / low * 100:.0f}% above its lowest"
+
+
+def build_numbers(parts, current, history):
+    total, spent, stale = 0.0, 0.0, []
+    for p in parts:
+        if not p.get("in_build"):
+            continue
+        n = p["name"]
+        if p.get("bought"):
+            price = p["bought"]
+            spent += price
+        elif n in current:
+            price = current[n]
+        else:
+            price = (history.get(n) or [p["last_seen"]])[-1]
+            stale.append(n)
+        total += price
+    return total, spent, stale
+
+
+def format_report(parts, current, list_prices, history, days, today, alerts, failures):
+    """Telegram HTML report: summary, watched parts, alerts, other parts, unreadable pages."""
+    from datetime import date as _d
+    total, spent, stale = build_numbers(parts, current, history)
+    diff = total - BUILD_TARGET
+    mark = "\U0001F7E2" if diff <= 0 else "\U0001F534"
+    head = f"<b>\U0001F4CA Price report \u00b7 {_d.fromisoformat(today).strftime('%a %d %b')}</b>"
+    build = (f"<b>Build</b>  {money(total)} / goal {money(BUILD_TARGET)}  {mark} "
+             f"{money(abs(diff))} {'under - BUY' if diff <= 0 else 'over'}")
+    if spent:
+        build += (f"\nBought {money(spent)} \u00b7 still to buy {money(total - spent)} "
+                  f"\u00b7 budget left {money(BUILD_TARGET - spent)}")
+    if stale:
+        build += f"\n<i>{len(stale)} part(s) unreadable today, last known price used</i>"
+    blocks = [head + "\n\n" + build]
+
+    def line_parts(p):
+        n = p["name"]
+        price = current[n]
+        past = history.get(n, [])
+        count = len((days or {}).get(n, set()) | {today})
+        icon, verdict = part_status(p, price, past, count, list_prices.get(n))
+        bits = [f"<b>{money(price)}</b>"]
+        if p.get("last_seen"):
+            ch = (price - p["last_seen"]) / p["last_seen"] * 100
+            bits.append("same as first seen" if abs(ch) < 0.5 else f"{ch:+.0f}% vs first seen")
+        lp = list_prices.get(n)
+        if lp:
+            bits.append(f"list {money(lp)} ({(lp - price) / lp * 100:.0f}% off)")
+        return icon, verdict, bits, past
+
+    watched, others, bought = [], [], []
+    for p in parts:
+        n = p["name"]
+        if p.get("bought"):
+            bought.append(f"\u2705 {esc(label(n))} \u2014 bought {money(p['bought'])}")
+        elif n in current:
+            (watched if p.get("buying") else others).append(p)
+
+    if watched or bought:
+        rows = list(bought)
+        for p in watched:
+            icon, verdict, bits, past = line_parts(p)
+            row = f"{icon} <b>{esc(label(p['name']))}</b>\n    " + " \u00b7 ".join(bits)
+            if past:
+                row += f"\n    low {money(min(past))} \u00b7 avg {money(sum(past) / len(past))}"
+            row += f"\n    {esc(verdict)}"
+            if p.get("goal_part"):
+                gp = goal_price(parts, current, history, p)
+                need = (current[p["name"]] - gp) / current[p["name"]] * 100
+                row += (f"\n    goal price \u2264 {money(gp)}" + (f" (needs {need:.0f}% off)" if need > 0 else " \u2014 reached"))
+            rows.append(row)
+        blocks.append("<b>\u2B50 Watching</b>\n" + "\n".join(rows))
+
+    if alerts:
+        blocks.append("<b>\U0001F514 Alerts</b>\n" + "\n".join(f"\u2022 {esc(a)}" for a in alerts))
+
+    if others:
+        rows = []
+        for p in others:
+            icon, verdict, bits, _ = line_parts(p)
+            rows.append(f"{icon} {esc(label(p['name']))} \u2014 " + " \u00b7 ".join(b.replace(" vs first seen", "") for b in bits))
+        blocks.append("<b>\U0001F4CB Other parts</b>\n" + "\n".join(rows))
+
+    ctx = sale_context(today)
+    if ctx:
+        blocks.append("\U0001F3F7 " + esc(" \u00b7 ".join(ctx)) + "\n<i>Sale prices are not always real discounts.</i>")
+
+    if failures:
+        rows = [f"\u2022 <a href=\"{esc(u)}\">{esc(label(n))}</a> ({esc(st)})" for n, st, u in failures]
+        blocks.append(f"<b>\u26A0\uFE0F Could not read {len(failures)}</b> \u2014 tap to check by hand\n" + "\n".join(rows))
+        if len(failures) == len([p for p in parts if not p.get("bought")]):
+            blocks.append("Every page failed. Amazon is probably blocking this connection.")
+    blocks.append("\U0001F7E2 good \u00b7 \U0001F7E1 near/ok \u00b7 \U0001F534 wait \u00b7 \u26AA too early")
+    return "\n\n".join(blocks)
+
+
 def parse_search(html):
     """Results from an Amazon.sa search page: [(title, price, url)]."""
     out = []
@@ -453,7 +500,7 @@ def run_searches(parts, current):
         send_telegram("WEEKLY: OTHER WHITE OPTIONS (cheapest matches on Amazon.sa search)\n\n" + "\n\n".join(blocks))
 
 
-def send_telegram(text):
+def send_telegram(text, use_html=False):
     token, chat_id = os.environ.get("TELEGRAM_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         print("Telegram not configured; message below was NOT sent:\n" + text)
@@ -468,7 +515,7 @@ def send_telegram(text):
     for chunk in chunks:
         resp = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            data={"chat_id": chat_id, "text": chunk[:4000], "disable_web_page_preview": "true"},
+            data={"chat_id": chat_id, "text": chunk[:4000], "disable_web_page_preview": "true", **({"parse_mode": "HTML"} if use_html else {})},
             timeout=30,
         )
         if resp.status_code != 200:
@@ -529,7 +576,7 @@ def main():
 
     check_deals(parts, current, list_prices, history)
 
-    failures = [f"{p['name']} ({status_of.get(p['name'], 'not_read')})\n  {p['url']}" for p in parts if p["name"] not in current]
+    failures = [(p["name"], status_of.get(p["name"], "not_read"), p["url"]) for p in parts if p["name"] not in current]
     final = os.environ.get("TRACKER_FINAL", "1") == "1"
     if failures and not final:
         PARTIAL_FILE.write_text(json.dumps({"date": today, "ok": {n: [current[n], list_prices.get(n)] for n in current}}))
@@ -548,17 +595,7 @@ def main():
         if p["name"] in current and not p.get("bought"):
             alerts += evaluate(p, current[p["name"]], history.get(p["name"], []))
 
-    lines = [build_summary(parts, current, history)]
-    advice = buy_advice(parts, current, history, today, list_prices, days)
-    if advice:
-        lines.append("ALL PARTS (* = you plan to buy)\n\n" + advice)
-    if alerts:
-        lines.append("Price alerts:\n" + "\n".join(f"- {a}" for a in alerts))
-    if failures:
-        lines.append(f"Could not read {len(failures)} of {len(parts)} pages:\n" + "\n".join(f"- {f}" for f in failures))
-        if len(failures) == len(parts):
-            lines.append("Every page failed. Amazon is probably blocking this connection. Check prices manually and see README.")
-    send_telegram("\n\n".join(lines))
+    send_telegram(format_report(parts, current, list_prices, history, days, today, alerts, failures), use_html=True)
     if date.today().weekday() == 4:  # Fridays: look for other white models
         run_searches(parts, current)
     return 0
