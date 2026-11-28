@@ -5,7 +5,7 @@
   {"name": "GPU alt - Gigabyte RX 9060 XT Ice", "url": "https://amzn.eu/d/0aRLuLKe", "last_seen": 3330.0, "target": 2900.0, "buying": true, "spam_discount": 20, "alt_for": "GPU - XFX RX 9070 XT White"},
   {"name": "GPU alt - Gigabyte RTX 5070 Eagle Ice", "url": "https://amzn.eu/d/0eViyy9Z", "last_seen": 3788.21, "target": 3400.0},
   {"name": "Motherboard - ASUS B650E MAX Gaming WiFi W", "url": "https://amzn.eu/d/02rGWa3d", "last_seen": 663.0, "target": 600.0, "in_build": true},
-  {"name": "RAM - Corsair Vengeance RGB RS 16GB White", "url": "https://amzn.eu/d/07bdDotG", "last_seen": 1322.28, "target": 1190.0, "in_build": true},
+  {"name": "RAM - Corsair Vengeance RGB RS 16GB White", "url": "https://amzn.eu/d/07bdDotG", "last_seen": 1322.28, "target": 1190.0, "in_build": true, "buying": true, "spam_discount": 20},
   {"name": "PSU - Lian Li EDGE Gold 850W White", "url": "https://amzn.eu/d/060ASsJg", "last_seen": 479.0, "target": 430.0, "in_build": true},
   {"name": "AIO - Thermalright Frozen Magic 360 White", "url": "https://amzn.eu/d/0hnP1AwY", "last_seen": 281.68, "target": 255.0, "in_build": true},
   {"name": "Case - Lian Li O11 Vision Compact White", "url": "https://amzn.eu/d/0dfL3ICy", "last_seen": 499.0, "target": 450.0, "in_build": true},
